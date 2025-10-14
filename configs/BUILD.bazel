@@ -1,0 +1,12 @@
+filegroup(
+    name = "setting_yaml_file",
+    srcs = ["spacemouse_settings.yaml"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "spacemouse_settings",
+    srcs = ["spacemouse_settings.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@drake//common/yaml:yaml_read_archive"],
+)

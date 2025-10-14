@@ -2,9 +2,14 @@ cc_binary(
     name = "run_driver",
     srcs = ["run_driver.cc"],
     deps = [
-        "@lcm//:lcm",
-        "@libspnav//:libspnav",
-        "@gflags",
+        "//configs:spacemouse_settings",
         "//lcmtypes:lcmt_robot",
+        "@libspnav//:libspnav",
+        "@lcm//:lcm",
+        "@gflags",
+        "@drake//common/yaml:yaml_io",
     ],
+    data = [
+        "//configs:setting_yaml_file",
+    ]
 )

@@ -9,14 +9,11 @@ static_trans_deadband: 0.1
 # Set the rotational deadband
 static_rot_deadband: 0.1
 
-# Set the scale of the linear output
-linear_scale:
-  - x: 1
-  - y: 1
-  - z: 1
+# For normalizing output values from SpaceMouse to [-1, 1]
+full_scale: 512.0
 
-# Set the scale of the angular output
-angular_scale:
-  - x: 1
-  - y: 1
-  - z: 1
+# Set the scale of the linear output (to adjust sensitivity)
+linear_scale: [1, 1, 1]
+
+# Set the scale of the angular output (to adjust sensitivity)
+angular_scale: [1, 1, 1]
