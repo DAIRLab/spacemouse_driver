@@ -1,0 +1,10 @@
+cc_binary(
+    name = "run_driver",
+    srcs = ["run_driver.cc"],
+    deps = [
+        "@lcm//:lcm",
+        "@libspnav//:libspnav",
+        "@gflags",
+        "//lcmtypes:lcmt_robot",
+    ],
+)

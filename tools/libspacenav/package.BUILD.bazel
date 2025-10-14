@@ -1,0 +1,16 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+configure_make(
+    name = "libspnav",
+    lib_source = "@libspnav//:all_srcs",
+    configure_in_place = True,
+    out_static_libs = ["libspnav.a"],
+    out_shared_libs = ["libspnav.so"],
+    visibility = ["//visibility:public"],
+    linkopts = ["-lX11"],
+)
+

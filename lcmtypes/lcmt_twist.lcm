@@ -1,0 +1,10 @@
+package spacemouse;
+
+/* Combines offset and rot_offset into a single message.
+*/
+struct lcmt_twist
+{
+  int64_t utime;
+  double linear[3];
+  double angular[3];
+}
