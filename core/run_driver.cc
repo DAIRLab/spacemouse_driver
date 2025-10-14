@@ -2,10 +2,18 @@
 #include "drake/common/yaml/yaml_io.h"
 #include "spacemouse/lcmt_spacemouse_state.hpp"
 #include <chrono>
+#include <csignal>
 #include <gflags/gflags.h>
 #include <iostream>
 #include <lcm/lcm-cpp.hpp>
 #include <spnav.h>
+
+std::atomic<bool> running(true);
+
+void signalHandler(int signum) {
+  std::cout << "\nInterrupt signal (" << signum << ") received.\n";
+  running = false; // Stop the loop gracefully
+}
 
 DEFINE_string(lcm_channel, "SPACE_MOUSE_TWIST",
               "LCM channel to publish twist messages");
@@ -51,7 +59,7 @@ int main(int argc, char **argv) {
   double normed_ry = 0;
   double normed_rz = 0;
 
-  while (true) {
+  while (running) {
     auto ret = spnav_poll_event(&sev);
     switch (ret) {
     case 0:
@@ -123,5 +131,9 @@ int main(int argc, char **argv) {
     }
     lcm.publish(FLAGS_lcm_channel, &state);
   }
+
+  // Clean up before exiting
+  spnav_close();
+  std::cout << "Spacenav closed and program exited gracefully.\n";
   return 0;
 }
