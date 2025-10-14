@@ -60,6 +60,7 @@ int main(int argc, char **argv) {
   double normed_rz = 0;
 
   while (running) {
+    std::signal(SIGINT, signalHandler);
     auto ret = spnav_poll_event(&sev);
     switch (ret) {
     case 0:
@@ -107,6 +108,7 @@ int main(int argc, char **argv) {
       std::cout << "Received an unknown event from the SpaceMouse, it should "
                    "not happen"
                 << std::endl;
+      running = false;
       break;
     }
 
