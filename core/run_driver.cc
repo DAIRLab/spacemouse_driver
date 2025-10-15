@@ -7,6 +7,7 @@
 #include <iostream>
 #include <lcm/lcm-cpp.hpp>
 #include <spnav.h>
+#include <thread>
 
 std::atomic<bool> running(true);
 
@@ -21,10 +22,13 @@ DEFINE_string(lcm_url, "udpm://239.255.76.67:7667?ttl=1",
               "LCM URL with IP, port, and TTL settings");
 DEFINE_string(settings_file_path, "configs/spacemouse_settings.yaml",
               "YAML file containing the settings for the SpaceMouse");
+DEFINE_int32(rate, 2000, "Rate to publish state messages (Hz)");
 int main(int argc, char **argv) {
   // Parse the settings file
   auto settings =
       drake::yaml::LoadYamlFile<SpacemouseSettings>(FLAGS_settings_file_path);
+  const auto period = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::duration<double>(1.0 / FLAGS_rate));
 
   // Try to connect to a SpaceMouse
   if (spnav_open() == -1) {
@@ -58,6 +62,8 @@ int main(int argc, char **argv) {
   double normed_rx = 0;
   double normed_ry = 0;
   double normed_rz = 0;
+
+  auto next_time = std::chrono::steady_clock::now();
 
   while (running) {
     std::signal(SIGINT, signalHandler);
@@ -132,6 +138,10 @@ int main(int argc, char **argv) {
       state.button_pressed[i] = button_pressed[i];
     }
     lcm.publish(FLAGS_lcm_channel, &state);
+
+    // Sleep for the remaining time to reach the desired rate
+    next_time += period;
+    std::this_thread::sleep_until(next_time);
   }
 
   // Clean up before exiting
