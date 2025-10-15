@@ -36,8 +36,8 @@ bazel build ... --keep_going
 
 ## Running LCM Driver
 
-Under `spacemouse_driver` directory, simply run
+After building, under `spacemouse_driver` directory, simply run
 
 ```sh
-bazel run //core:run_driver
+bazel-bin/core/run_driver --lcm_url=udpm://239.255.76.67:7667?ttl=0 --rate=1000
 ```

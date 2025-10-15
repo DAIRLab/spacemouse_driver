@@ -18,7 +18,7 @@ void signalHandler(int signum) {
 
 DEFINE_string(lcm_channel, "SPACE_MOUSE_TWIST",
               "LCM channel to publish twist messages");
-DEFINE_string(lcm_url, "udpm://239.255.76.67:7667?ttl=1",
+DEFINE_string(lcm_url, "udpm://239.255.76.67:7667?ttl=0",
               "LCM URL with IP, port, and TTL settings");
 DEFINE_string(settings_file_path, "configs/spacemouse_settings.yaml",
               "YAML file containing the settings for the SpaceMouse");
