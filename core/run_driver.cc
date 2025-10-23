@@ -18,15 +18,17 @@ void signalHandler(int signum) {
 }
 
 spacemouse::lcmt_ur_command
-construct_ur_command(const spacemouse::lcmt_spacemouse_state &state) {
+construct_ur_command(const spacemouse::lcmt_spacemouse_state &state,
+                     const SpacemouseSettings &settings) {
   spacemouse::lcmt_ur_command command;
   command.utime = state.utime;
   command.control_mode_expected = spacemouse::lcmt_ur_command::kTCPVelocity;
   for (int i = 0; i < 3; i++) {
-    command.tcp_velocity[i] = state.linear[i];
+    command.tcp_velocity[i] = state.linear[i] * settings.ur_linear_scale[i];
   }
   for (int i = 3; i < 6; i++) {
-    command.tcp_velocity[i] = state.angular[i - 3];
+    command.tcp_velocity[i] =
+        state.angular[i - 3] * settings.ur_angular_scale[i - 3];
   }
 
   // Set the joint positions, velocities, and TCP pose to zero
@@ -41,7 +43,7 @@ construct_ur_command(const spacemouse::lcmt_spacemouse_state &state) {
 
 DEFINE_string(state_lcm_channel, "SPACE_MOUSE_0_STATE",
               "LCM channel to publish state messages");
-DEFINE_string(robot_command_lcm_channel, "SPACE_MOUSE_0_COMMAND",
+DEFINE_string(robot_command_lcm_channel, "UR_COMMAND",
               "LCM channel to publish robot command messages");
 DEFINE_string(lcm_url, "udpm://239.255.76.67:7667?ttl=0",
               "LCM URL with IP, port, and TTL settings");
@@ -108,22 +110,26 @@ int main(int argc, char **argv) {
       // set to zero to prevent drift.
       if (++no_motion_count >
           static_cast<int>(settings.static_count_threshold)) {
-        if (settings.zero_when_static &&
-            std::abs(sev.motion.x) < settings.static_trans_deadband &&
-            std::abs(sev.motion.y) < settings.static_trans_deadband &&
-            std::abs(sev.motion.z) < settings.static_trans_deadband) {
+        if (settings.zero_when_static) {
+          // Check translational axes (x, y, z)
+          int *motion_values[] = {&sev.motion.x, &sev.motion.y, &sev.motion.z};
+          double *normed_values[] = {&normed_x, &normed_y, &normed_z};
+          for (int i = 0; i < 3; ++i) {
+            if (std::abs(*motion_values[i]) < settings.static_trans_deadband) {
+              *normed_values[i] = 0;
+            }
+          }
 
-          normed_x = 0;
-          normed_y = 0;
-          normed_z = 0;
-        }
-        if (settings.zero_when_static &&
-            std::abs(sev.motion.rx) < settings.static_rot_deadband &&
-            std::abs(sev.motion.ry) < settings.static_rot_deadband &&
-            std::abs(sev.motion.rz) < settings.static_rot_deadband) {
-          normed_rx = 0;
-          normed_ry = 0;
-          normed_rz = 0;
+          // Check rotational axes (rx, ry, rz)
+          int *rot_motion_values[] = {&sev.motion.rx, &sev.motion.ry,
+                                      &sev.motion.rz};
+          double *rot_normed_values[] = {&normed_rx, &normed_ry, &normed_rz};
+          for (int i = 0; i < 3; ++i) {
+            if (std::abs(*rot_motion_values[i]) <
+                settings.static_rot_deadband) {
+              *rot_normed_values[i] = 0;
+            }
+          }
         }
         no_motion_count = 0; // Reset the no motion count
       }
@@ -156,12 +162,12 @@ int main(int argc, char **argv) {
                       sys_now.time_since_epoch())
                       .count();
 
-    state.linear[0] = normed_x * settings.linear_scale[0];
-    state.linear[1] = normed_y * settings.linear_scale[1];
-    state.linear[2] = normed_z * settings.linear_scale[2];
-    state.angular[0] = normed_rx * settings.angular_scale[0];
-    state.angular[1] = normed_ry * settings.angular_scale[1];
-    state.angular[2] = normed_rz * settings.angular_scale[2];
+    state.linear[0] = normed_x;
+    state.linear[1] = normed_y;
+    state.linear[2] = normed_z;
+    state.angular[0] = normed_rx;
+    state.angular[1] = normed_ry;
+    state.angular[2] = normed_rz;
     state.n_buttons = n_buttons;
     state.button_pressed.resize(n_buttons);
 
@@ -174,7 +180,8 @@ int main(int argc, char **argv) {
     auto now = std::chrono::steady_clock::now();
     if (now - last_command_pub_time >= command_period) {
       if (FLAGS_robot_name == "UR10") {
-        spacemouse::lcmt_ur_command command = construct_ur_command(state);
+        spacemouse::lcmt_ur_command command =
+            construct_ur_command(state, settings);
         lcm.publish(FLAGS_robot_command_lcm_channel, &command);
       } else {
         std::cout << "Robot name " << FLAGS_robot_name << " not supported"

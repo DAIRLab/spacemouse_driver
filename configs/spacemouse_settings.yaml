@@ -4,16 +4,14 @@ zero_when_static: true
 static_count_threshold: 30
 
 # Set the translational deadband
-static_trans_deadband: 0.1
+static_trans_deadband: 50
 
 # Set the rotational deadband
-static_rot_deadband: 0.1
+static_rot_deadband: 50
 
 # For normalizing output values from SpaceMouse to [-1, 1]
 full_scale: 512.0
 
-# Set the scale of the linear output (to adjust sensitivity)
-linear_scale: [1, 1, 1]
-
-# Set the scale of the angular output (to adjust sensitivity)
-angular_scale: [1, 1, 1]
+# Only for sending UR commands
+ur_linear_scale: [0.05, 0.05, 0.05]
+ur_angular_scale: [0.2, 0.2, 0.2]
