@@ -1,6 +1,7 @@
 #include "configs/spacemouse_settings.h"
 #include "drake/common/yaml/yaml_io.h"
 #include "spacemouse/lcmt_spacemouse_state.hpp"
+#include "spacemouse/lcmt_ur_command.hpp"
 #include <chrono>
 #include <csignal>
 #include <gflags/gflags.h>
@@ -16,19 +17,48 @@ void signalHandler(int signum) {
   running = false; // Stop the loop gracefully
 }
 
-DEFINE_string(lcm_channel, "SPACE_MOUSE_TWIST",
-              "LCM channel to publish twist messages");
+spacemouse::lcmt_ur_command
+construct_ur_command(const spacemouse::lcmt_spacemouse_state &state) {
+  spacemouse::lcmt_ur_command command;
+  command.utime = state.utime;
+  command.control_mode_expected = spacemouse::lcmt_ur_command::kTCPVelocity;
+  for (int i = 0; i < 3; i++) {
+    command.tcp_velocity[i] = state.linear[i];
+  }
+  for (int i = 3; i < 6; i++) {
+    command.tcp_velocity[i] = state.angular[i - 3];
+  }
+
+  // Set the joint positions, velocities, and TCP pose to zero
+  // even though they are not used for TCP velocity control
+  for (int i = 0; i < 6; i++) {
+    command.tcp_pose[i] = 0;
+    command.joint_position[i] = 0;
+    command.joint_velocity[i] = 0;
+  }
+  return command;
+}
+
+DEFINE_string(state_lcm_channel, "SPACE_MOUSE_0_STATE",
+              "LCM channel to publish state messages");
+DEFINE_string(robot_command_lcm_channel, "SPACE_MOUSE_0_COMMAND",
+              "LCM channel to publish robot command messages");
 DEFINE_string(lcm_url, "udpm://239.255.76.67:7667?ttl=0",
               "LCM URL with IP, port, and TTL settings");
 DEFINE_string(settings_file_path, "configs/spacemouse_settings.yaml",
               "YAML file containing the settings for the SpaceMouse");
-DEFINE_int32(rate, 2000, "Rate to publish state messages (Hz)");
+DEFINE_int32(state_publish_rate, 2000, "Rate to publish state messages (Hz)");
+DEFINE_string(robot_name, "UR10", "Name of the robot");
+DEFINE_int32(robot_command_rate, 130,
+             "Rate to publish robot command messages (Hz)");
 int main(int argc, char **argv) {
   // Parse the settings file
   auto settings =
       drake::yaml::LoadYamlFile<SpacemouseSettings>(FLAGS_settings_file_path);
-  const auto period = std::chrono::duration_cast<std::chrono::microseconds>(
-      std::chrono::duration<double>(1.0 / FLAGS_rate));
+  const auto state_period =
+      std::chrono::duration<double>(1.0 / FLAGS_state_publish_rate);
+  const auto command_period =
+      std::chrono::duration<double>(1.0 / FLAGS_robot_command_rate);
 
   // Try to connect to a SpaceMouse
   if (spnav_open() == -1) {
@@ -64,6 +94,8 @@ int main(int argc, char **argv) {
   double normed_rz = 0;
 
   auto next_time = std::chrono::steady_clock::now();
+  auto last_command_pub_time = next_time;
+  spacemouse::lcmt_spacemouse_state state;
 
   while (running) {
     std::signal(SIGINT, signalHandler);
@@ -118,12 +150,11 @@ int main(int argc, char **argv) {
       break;
     }
 
-    // Fill the state LCM message and publish it
-    spacemouse::lcmt_spacemouse_state state;
-
-    auto now = std::chrono::system_clock::now();
-    std::time_t utime = std::chrono::system_clock::to_time_t(now);
-    state.utime = utime;
+    // Get the system time in microseconds
+    auto sys_now = std::chrono::system_clock::now();
+    state.utime = std::chrono::duration_cast<std::chrono::microseconds>(
+                      sys_now.time_since_epoch())
+                      .count();
 
     state.linear[0] = normed_x * settings.linear_scale[0];
     state.linear[1] = normed_y * settings.linear_scale[1];
@@ -137,10 +168,26 @@ int main(int argc, char **argv) {
     for (int i = 0; i < n_buttons; i++) {
       state.button_pressed[i] = button_pressed[i];
     }
-    lcm.publish(FLAGS_lcm_channel, &state);
+    lcm.publish(FLAGS_state_lcm_channel, &state);
 
-    // Sleep for the remaining time to reach the desired rate
-    next_time += period;
+    // Construct the robot command and publish it
+    auto now = std::chrono::steady_clock::now();
+    if (now - last_command_pub_time >= command_period) {
+      if (FLAGS_robot_name == "UR10") {
+        spacemouse::lcmt_ur_command command = construct_ur_command(state);
+        lcm.publish(FLAGS_robot_command_lcm_channel, &command);
+      } else {
+        std::cout << "Robot name " << FLAGS_robot_name << " not supported"
+                  << std::endl;
+        running = false;
+        break;
+      }
+      last_command_pub_time = now;
+    }
+
+    // Maintain base loop rate
+    next_time +=
+        std::chrono::duration_cast<std::chrono::microseconds>(state_period);
     std::this_thread::sleep_until(next_time);
   }
 
