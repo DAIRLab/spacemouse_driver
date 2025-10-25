@@ -35,3 +35,10 @@ archive_override(
 # Add libspnav dependency
 libspnav_extension = use_extension("@spacemouse//tools/libspacenav:repository.bzl", "libspnav_extension")
 use_repo(libspnav_extension, "libspnav")
+
+bazel_dep(name = "robotiq-driver")
+git_override(
+    module_name = "robotiq-driver",
+    remote = "git@github.com:DAIRLab/robotiq_gripper.git",
+    branch = "main",
+    )
