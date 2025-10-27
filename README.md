@@ -39,5 +39,21 @@ bazel build ... --keep_going
 After building, under `spacemouse_driver` directory, simply run
 
 ```sh
-bazel-bin/core/run_driver --lcm_url=udpm://239.255.76.67:7667?ttl=0 --rate=1000
+bazel-bin/core/run_driver --lcm_url=udpm://239.255.76.67:7667?ttl=0 --robot_name=UR10 --robot_command_rate=125
 ```
+
+## Running LCM Driver inside a Docker container
+
+The driver communicates with the `spacenavd` daemon through a Unix socket at `/var/run/spnav.sock`. To run the driver in a Docker container, mount this socket:
+
+**Option 1: Using docker run**
+```sh
+docker run -v /var/run/spnav.sock:/var/run/spnav.sock <image_name>
+```
+
+**Option 2: Using docker-compose.yaml**
+```yaml
+volumes:
+  - /var/run/spnav.sock:/var/run/spnav.sock
+```
+**Important:** The `spacenavd` daemon must be running on the host system for the containerized driver to function properly.

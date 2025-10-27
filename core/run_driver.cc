@@ -20,12 +20,12 @@ std::atomic<bool> running(true);
 
 void signalHandler(int signum) {
   std::cout << "\nInterrupt signal (" << signum << ") received.\n";
-  running = false;  // Stop the loop gracefully
+  running = false; // Stop the loop gracefully
 }
 
-spacemouse::lcmt_ur_command construct_ur_command(
-    const spacemouse::lcmt_spacemouse_state& state,
-    const SpacemouseSettings& settings) {
+spacemouse::lcmt_ur_command
+construct_ur_command(const spacemouse::lcmt_spacemouse_state &state,
+                     const SpacemouseSettings &settings) {
   spacemouse::lcmt_ur_command command;
   command.utime = state.utime;
   command.control_mode_expected = spacemouse::lcmt_ur_command::kTCPVelocity;
@@ -85,7 +85,7 @@ std::unique_ptr<RobotiqGripper> initialize_gripper() {
   return nullptr;
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   // Parse the settings file
   auto settings =
@@ -138,83 +138,91 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, signalHandler);
     auto ret = spnav_poll_event(&sev);
     switch (ret) {
-      case 0:
-        // After a certain number of polls with no motion, the device is
-        // considered static if the flag zero_when_static is set and the motion
-        // is less than the static deadband, the linear and angular velocities
-        // are set to zero to prevent drift.
-        if (++no_motion_count >
-            static_cast<int>(settings.static_count_threshold)) {
-          if (settings.zero_when_static) {
-            // Check translational axes (x, y, z)
-            int* motion_values[] = {&sev.motion.x, &sev.motion.y,
-                                    &sev.motion.z};
-            double* normed_values[] = {&normed_x, &normed_y, &normed_z};
-            for (int i = 0; i < 3; ++i) {
-              if (std::abs(*motion_values[i]) <
-                  settings.static_trans_deadband) {
-                *normed_values[i] = 0;
-              }
-            }
-
-            // Check rotational axes (rx, ry, rz)
-            int* rot_motion_values[] = {&sev.motion.rx, &sev.motion.ry,
-                                        &sev.motion.rz};
-            double* rot_normed_values[] = {&normed_rx, &normed_ry, &normed_rz};
-            for (int i = 0; i < 3; ++i) {
-              if (std::abs(*rot_motion_values[i]) <
-                  settings.static_rot_deadband) {
-                *rot_normed_values[i] = 0;
-              }
+    case 0:
+      // After a certain number of polls with no motion, the device is
+      // considered static if the flag zero_when_static is set and the motion
+      // is less than the static deadband, the linear and angular velocities
+      // are set to zero to prevent drift.
+      if (++no_motion_count >
+          static_cast<int>(settings.static_count_threshold)) {
+        if (settings.zero_when_static) {
+          // Check translational axes (x, y, z)
+          int *motion_values[] = {&sev.motion.x, &sev.motion.y, &sev.motion.z};
+          double *normed_values[] = {&normed_x, &normed_y, &normed_z};
+          for (int i = 0; i < 3; ++i) {
+            if (std::abs(*motion_values[i]) < settings.static_trans_deadband) {
+              *normed_values[i] = 0;
             }
           }
-          no_motion_count = 0;  // Reset the no motion count
-        }
-        break;
-      case SPNAV_EVENT_MOTION:
-        normed_x = sev.motion.z / settings.full_scale;
-        normed_y = -sev.motion.x / settings.full_scale;
-        normed_z = sev.motion.y / settings.full_scale;
 
-        normed_rx = sev.motion.rz / settings.full_scale;
-        normed_ry = -sev.motion.rx / settings.full_scale;
-        normed_rz = sev.motion.ry / settings.full_scale;
-
-        no_motion_count = 0;  // Reset the no motion count
-        break;
-      case SPNAV_EVENT_BUTTON:
-        button_pressed[sev.button.bnum] = sev.button.press;
-        if (gripper) {
-          if (!sev.button.press) {
-            // Ignore button release events
-            break;
-          }
-          if ((gripper->getIntValue(RobotiqCommand::GOTO_STATUS) != 0) &&
-              (gripper->getIntValue(RobotiqCommand::OBJECT_DETECTION_STATUS) ==
-               0)) {
-            // Skip processing button events while the gripper is moving
-            break;
-          }
-          // Example: Open gripper on button 0 press, close on button 1 press
-          if (sev.button.bnum == 0 && sev.button.press) {
-            gripper->moveToPosition(
-                std::min(gripper->getCurrentPosition() + FLAGS_gripper_offset,
-                         255),
-                FLAGS_gripper_speed, FLAGS_gripper_force);
-          } else if (sev.button.bnum == 1 && sev.button.press) {
-            gripper->moveToPosition(
-                std::max(gripper->getCurrentPosition() - FLAGS_gripper_offset,
-                         0),
-                FLAGS_gripper_speed, FLAGS_gripper_force);
+          // Check rotational axes (rx, ry, rz)
+          int *rot_motion_values[] = {&sev.motion.rx, &sev.motion.ry,
+                                      &sev.motion.rz};
+          double *rot_normed_values[] = {&normed_rx, &normed_ry, &normed_rz};
+          for (int i = 0; i < 3; ++i) {
+            if (std::abs(*rot_motion_values[i]) <
+                settings.static_rot_deadband) {
+              *rot_normed_values[i] = 0;
+            }
           }
         }
-        break;
-      default:
-        std::cout << "Received an unknown event from the SpaceMouse, it should "
-                     "not happen"
-                  << std::endl;
-        running = false;
-        break;
+        no_motion_count = 0; // Reset the no motion count
+      }
+      break;
+    case SPNAV_EVENT_MOTION:
+      normed_x = sev.motion.z / settings.full_scale;
+      normed_y = -sev.motion.x / settings.full_scale;
+      normed_z = sev.motion.y / settings.full_scale;
+
+      normed_rx = sev.motion.rz / settings.full_scale;
+      normed_ry = -sev.motion.rx / settings.full_scale;
+      normed_rz = sev.motion.ry / settings.full_scale;
+
+      no_motion_count = 0; // Reset the no motion count
+
+      // Safety check: clamp normalized values to [-1, 1] range to prevent
+      // extreme robot movements from invalid SpaceMouse data
+      double *normed_values[] = {&normed_x,  &normed_y,  &normed_z,
+                                 &normed_rx, &normed_ry, &normed_rz};
+      for (int i = 0; i < 6; i++) {
+        if (*normed_values[i] < -1.0 || *normed_values[i] > 1.0) {
+          *normed_values[i] = 0.0;
+        }
+      }
+
+      break;
+    case SPNAV_EVENT_BUTTON:
+      button_pressed[sev.button.bnum] = sev.button.press;
+      if (gripper) {
+        if (!sev.button.press) {
+          // Ignore button release events
+          break;
+        }
+        if ((gripper->getIntValue(RobotiqCommand::GOTO_STATUS) != 0) &&
+            (gripper->getIntValue(RobotiqCommand::OBJECT_DETECTION_STATUS) ==
+             0)) {
+          // Skip processing button events while the gripper is moving
+          break;
+        }
+        // Example: Open gripper on button 0 press, close on button 1 press
+        if (sev.button.bnum == 0 && sev.button.press) {
+          gripper->moveToPosition(
+              std::min(gripper->getCurrentPosition() + FLAGS_gripper_offset,
+                       255),
+              FLAGS_gripper_speed, FLAGS_gripper_force);
+        } else if (sev.button.bnum == 1 && sev.button.press) {
+          gripper->moveToPosition(
+              std::max(gripper->getCurrentPosition() - FLAGS_gripper_offset, 0),
+              FLAGS_gripper_speed, FLAGS_gripper_force);
+        }
+      }
+      break;
+    default:
+      std::cout << "Received an unknown event from the SpaceMouse, it should "
+                   "not happen"
+                << std::endl;
+      running = false;
+      break;
     }
 
     // Get the system time in microseconds
