@@ -39,6 +39,6 @@ use_repo(libspnav_extension, "libspnav")
 bazel_dep(name = "robotiq-driver")
 git_override(
     module_name = "robotiq-driver",
-    remote = "git@github.com:DAIRLab/robotiq_gripper.git",
+    remote = "https://github.com/DAIRLab/robotiq_gripper.git",
     branch = "main",
     )
