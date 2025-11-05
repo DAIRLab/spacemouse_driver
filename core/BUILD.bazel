@@ -14,3 +14,26 @@ cc_binary(
         "//configs:setting_yaml_file",
     ]
 )
+
+cc_binary(
+    name = "run_franka_driver",
+    srcs = ["run_franka_driver.cc"],
+    deps = [
+        "//configs:spacemouse_settings",
+        "//lcmtypes:lcmt_robot",
+        "@libspnav//:libspnav",
+        "@robotiq-driver//:robotiq_gripper",
+        "@lcm//:lcm",
+        "@gflags",
+        "@drake//common/yaml:yaml_io",
+        "@drake//math:geometric_transform",
+        "@drake//math:wrap_to",
+        "@drake//multibody/plant:plant",
+        "@drake//multibody/parsing:parsing",
+        "@drake//systems/framework:framework",
+
+    ],
+    data = [
+        "//configs:setting_yaml_file",
+    ]
+)

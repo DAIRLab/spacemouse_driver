@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   // Parse the settings file
   auto settings =
-      drake::yaml::LoadYamlFile<SpacemouseSettings>(FLAGS_settings_file_path);
+      drake::yaml::LoadYamlFile<URSpacemouseSettings>(FLAGS_settings_file_path);
   const auto state_period =
       std::chrono::duration<double>(1.0 / FLAGS_state_publish_rate);
   const auto command_period =
