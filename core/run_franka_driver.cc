@@ -4,6 +4,7 @@
 #include "spacemouse/lcmt_spacemouse_state.hpp"
 
 #include "drake/common/yaml/yaml_io.h"
+#include "drake/lcmt_schunk_wsg_command.hpp"
 #include "drake/math/roll_pitch_yaw.h"
 #include "drake/math/wrap_to.h"
 #include "drake/multibody/parsing/parser.h"
@@ -47,6 +48,12 @@ DEFINE_string(robot_command_lcm_channel, "TARGET_CARTESIAN_POSE",
               "LCM channel to publish robot command messages");
 DEFINE_string(robot_status_lcm_channel, "FRANKA_STATE",
               "LCM channel to receive robot status messages");
+DEFINE_string(gripper_state_lcm_channel, "GRIPPER_STATE",
+              "LCM channel to receive gripper state messages");
+DEFINE_string(gripper_command_lcm_channel, "GRIPPER_COMMAND",
+              "LCM channel to send gripper command messages");
+DEFINE_int32(gripper_offset, 20,
+             "Offset (in mm) to be added to gripper position");
 DEFINE_string(lcm_url, "udpm://239.255.76.67:7667?ttl=0",
               "LCM URL with IP, port, and TTL settings");
 DEFINE_string(settings_file_path, "configs/franka_spacemouse_settings.yaml",
@@ -144,11 +151,59 @@ class FrankaCartesianPoseIntegrator {
   double angular_scale_;
 };
 
+class FrankaHandStateListener {
+ public:
+  FrankaHandStateListener(const std::string& lcm_url,
+                          const std::string& lcm_gripper_state_channel)
+      : lcm_(lcm_url), lcm_gripper_state_channel_(lcm_gripper_state_channel) {}
+  ~FrankaHandStateListener() {}
+
+  int start() {
+    lcm::Subscription* sub =
+        lcm_.subscribe(lcm_gripper_state_channel_,
+                       &FrankaHandStateListener::handleGripperState, this);
+    sub->setQueueCapacity(100);
+    return 0;
+  }
+
+  std::optional<int> get_gripper_position() {
+    while (lcm_.handleTimeout(0) > 0) {
+    }
+
+    if (!last_gripper_state_.has_value()) {
+      std::cout << "No gripper state received yet." << std::endl;
+      return std::nullopt;
+    }
+
+    int position_in_mm = 0;
+    {
+      std::lock_guard<std::mutex> lock(gripper_state_mutex_);
+      position_in_mm = std::round(
+          (last_gripper_state_->position[0] + last_gripper_state_->position[1]) *
+          1000);
+    }
+    return position_in_mm;
+  }
+
+ private:
+  void handleGripperState(const lcm::ReceiveBuffer* rbuf,
+                          const std::string& channel,
+                          const spacemouse::lcmt_robot_output* msg) {
+    std::lock_guard<std::mutex> lock(gripper_state_mutex_);
+    last_gripper_state_ = *msg;
+  }
+
+  lcm::LCM lcm_;
+  std::string lcm_gripper_state_channel_;
+  std::optional<spacemouse::lcmt_robot_output> last_gripper_state_;
+  std::mutex gripper_state_mutex_;
+};
+
 inline const Eigen::Vector3d TOOL_ATTACHMENT_FRAME = {0, 0, 0.107};
 inline const drake::math::RigidTransform<double> T_EE_L7 =
     drake::math::RigidTransform<double>(
         drake::math::RotationMatrix<double>(
-            drake::math::RollPitchYaw<double>(M_PI, 0, 0)),
+            drake::math::RollPitchYaw<double>(M_PI, 0, -M_PI / 4)),
         TOOL_ATTACHMENT_FRAME);
 
 int main(int argc, char** argv) {
@@ -182,6 +237,11 @@ int main(int argc, char** argv) {
       settings.franka_linear_scale, settings.franka_angular_scale);
   std::cout << "Franka Cartesian Pose Integrator setup complete\n";
   integrator.start();
+
+  // Try to connect to the Franka Hand state listener
+  FrankaHandStateListener hand_listener(FLAGS_lcm_url,
+                                        FLAGS_gripper_state_lcm_channel);
+  hand_listener.start();
 
   // Try to connect to a SpaceMouse
   if (spnav_open() == -1) {
@@ -219,6 +279,8 @@ int main(int argc, char** argv) {
   auto next_time = std::chrono::steady_clock::now();
   auto last_command_pub_time = next_time;
   spacemouse::lcmt_spacemouse_state state;
+  drake::lcmt_schunk_wsg_command gripper_command;
+  std::optional<int> current_gripper_position;
 
   while (running) {
     std::signal(SIGINT, signalHandler);
@@ -270,11 +332,30 @@ int main(int argc, char** argv) {
         break;
       case SPNAV_EVENT_BUTTON:
         button_pressed[sev.button.bnum] = sev.button.press;
+        if (!sev.button.press) {
+          // Ignore button release events
+          break;
+        }
+        // Example: Open gripper on button 0 press, close on button 1 press
+        gripper_command.utime =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                .count();
+        current_gripper_position = hand_listener.get_gripper_position();
+        if (!current_gripper_position.has_value()) {
+          break;
+        }
+        if (sev.button.bnum == 0 && sev.button.press) {
+          gripper_command.target_position_mm = std::min(
+              current_gripper_position.value() + FLAGS_gripper_offset, 80);
+        } else if (sev.button.bnum == 1 && sev.button.press) {
+          gripper_command.target_position_mm = std::max(
+              current_gripper_position.value() - FLAGS_gripper_offset, 0);
+        }
+        lcm.publish(FLAGS_gripper_command_lcm_channel, &gripper_command);
+
         break;
       default:
-        std::cout << "Received an unknown event from the SpaceMouse, it should "
-                     "not happen"
-                  << std::endl;
         running = false;
         break;
     }

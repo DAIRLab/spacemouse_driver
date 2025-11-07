@@ -60,7 +60,7 @@ DEFINE_string(robot_name, "UR10", "Name of the robot");
 DEFINE_int32(robot_command_rate, 130,
              "Rate to publish robot command messages (Hz)");
 DEFINE_string(gripper_ip, "", "IP address of the gripper");
-DEFINE_int32(gripper_offset, 20, "Offset to be added to gripper position");
+DEFINE_int32(gripper_offset, 20, "Offset to be added to gripper position (position range is 0 - 255)");
 DEFINE_int32(gripper_speed, 100, "Speed of the gripper");
 DEFINE_int32(gripper_force, 0, "Force of the gripper");
 
