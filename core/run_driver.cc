@@ -133,6 +133,8 @@ int main(int argc, char **argv) {
   spacemouse::lcmt_spacemouse_state state;
 
   auto gripper = initialize_gripper();
+  double *normed_values[] = {&normed_x, &normed_y, &normed_z};
+  double *rot_normed_values[] = {&normed_rx, &normed_ry, &normed_rz};
 
   while (running) {
     std::signal(SIGINT, signalHandler);
@@ -148,7 +150,6 @@ int main(int argc, char **argv) {
         if (settings.zero_when_static) {
           // Check translational axes (x, y, z)
           int *motion_values[] = {&sev.motion.x, &sev.motion.y, &sev.motion.z};
-          double *normed_values[] = {&normed_x, &normed_y, &normed_z};
           for (int i = 0; i < 3; ++i) {
             if (std::abs(*motion_values[i]) < settings.static_trans_deadband) {
               *normed_values[i] = 0;
@@ -158,7 +159,6 @@ int main(int argc, char **argv) {
           // Check rotational axes (rx, ry, rz)
           int *rot_motion_values[] = {&sev.motion.rx, &sev.motion.ry,
                                       &sev.motion.rz};
-          double *rot_normed_values[] = {&normed_rx, &normed_ry, &normed_rz};
           for (int i = 0; i < 3; ++i) {
             if (std::abs(*rot_motion_values[i]) <
                 settings.static_rot_deadband) {
@@ -182,10 +182,11 @@ int main(int argc, char **argv) {
 
       // Safety check: clamp normalized values to [-1, 1] range to prevent
       // extreme robot movements from invalid SpaceMouse data
-      double *normed_values[] = {&normed_x,  &normed_y,  &normed_z,
-                                 &normed_rx, &normed_ry, &normed_rz};
-      for (int i = 0; i < 6; i++) {
+      for (int i = 0; i < 3; i++) {
         if (*normed_values[i] < -1.0 || *normed_values[i] > 1.0) {
+          *normed_values[i] = 0.0;
+        }
+        if (*rot_normed_values[i] < -1.0 || *rot_normed_values[i] > 1.0) {
           *normed_values[i] = 0.0;
         }
       }
