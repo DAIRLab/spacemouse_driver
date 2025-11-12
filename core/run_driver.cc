@@ -25,7 +25,7 @@ void signalHandler(int signum) {
 
 spacemouse::lcmt_ur_command
 construct_ur_command(const spacemouse::lcmt_spacemouse_state &state,
-                     const SpacemouseSettings &settings) {
+                     const URSpacemouseSettings &settings) {
   spacemouse::lcmt_ur_command command;
   command.utime = state.utime;
   command.control_mode_expected = spacemouse::lcmt_ur_command::kTCPVelocity;
