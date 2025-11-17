@@ -1,9 +1,19 @@
 package(default_visibility = ["//visibility:public"])
 
+cc_library(
+    name = "common",
+    hdrs = ["common.h"],
+    deps = [
+        "@drake//common:find_runfiles",
+        "@drake//common/yaml:yaml_io",
+    ],
+)
+
 cc_binary(
     name = "run_driver",
     srcs = ["run_driver.cc"],
     deps = [
+        "//core:common",
         "//configs:spacemouse_settings",
         "//lcmtypes:lcmt_robot",
         "@libspnav//:libspnav",
@@ -21,12 +31,14 @@ cc_binary(
     name = "run_franka_driver",
     srcs = ["run_franka_driver.cc"],
     deps = [
+        "//core:common",
         "//configs:spacemouse_settings",
         "//lcmtypes:lcmt_robot",
         "@libspnav//:libspnav",
         "@robotiq-driver//:robotiq_gripper",
         "@lcm//:lcm",
         "@gflags",
+        "@drake//common:find_resource",
         "@drake//common/yaml:yaml_io",
         "@drake//math:geometric_transform",
         "@drake//math:wrap_to",
@@ -38,5 +50,6 @@ cc_binary(
     ],
     data = [
         "//configs:setting_yaml_file",
+        "@drake_models//:franka_description",
     ]
 )

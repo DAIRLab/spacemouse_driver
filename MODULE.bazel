@@ -18,7 +18,7 @@ drake_dep_repositories = use_extension(
     "@drake//tools/workspace:default.bzl",
     "drake_dep_repositories",
 )
-use_repo(drake_dep_repositories, "lcm", "gflags")
+use_repo(drake_dep_repositories, "lcm", "gflags", "drake_models")
 bazel_dep(name = "drake")
 
 DRAKE_VERSION = "v1.42.0"

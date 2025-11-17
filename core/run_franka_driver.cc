@@ -1,13 +1,16 @@
+#include "common.h"
 #include "configs/spacemouse_settings.h"
 #include "spacemouse/lcmt_franka_cartesian_pose.hpp"
 #include "spacemouse/lcmt_robot_output.hpp"
 #include "spacemouse/lcmt_spacemouse_state.hpp"
 
+#include "drake/common/find_resource.h"
 #include "drake/common/yaml/yaml_io.h"
 #include "drake/lcmt_schunk_wsg_command.hpp"
 #include "drake/math/roll_pitch_yaw.h"
 #include "drake/math/wrap_to.h"
 #include "drake/multibody/parsing/parser.h"
+#include "drake/multibody/parsing/package_map.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/systems/framework/context.h"
 
@@ -178,9 +181,9 @@ class FrankaHandStateListener {
     int position_in_mm = 0;
     {
       std::lock_guard<std::mutex> lock(gripper_state_mutex_);
-      position_in_mm = std::round(
-          (last_gripper_state_->position[0] + last_gripper_state_->position[1]) *
-          1000);
+      position_in_mm = std::round((last_gripper_state_->position[0] +
+                                   last_gripper_state_->position[1]) *
+                                  1000);
     }
     return position_in_mm;
   }
@@ -210,8 +213,14 @@ int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   // Parse the settings file
-  auto settings = drake::yaml::LoadYamlFile<FrankaSpacemouseSettings>(
-      FLAGS_settings_file_path);
+  auto find_runfile = FindRunfile(FLAGS_settings_file_path);
+  if (!find_runfile.has_value()) {
+    std::cerr << "Could not find settings file at path: "
+              << FLAGS_settings_file_path << std::endl;
+    return 1;
+  }
+  auto settings =
+      drake::yaml::LoadYamlFile<FrankaSpacemouseSettings>(find_runfile.value());
   const auto state_period =
       std::chrono::duration<double>(1.0 / FLAGS_state_publish_rate);
   const auto command_period =

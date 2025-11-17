@@ -49,7 +49,7 @@ construct_ur_command(const spacemouse::lcmt_spacemouse_state &state,
 
 DEFINE_string(state_lcm_channel, "SPACE_MOUSE_0_STATE",
               "LCM channel to publish state messages");
-DEFINE_string(robot_command_lcm_channel, "UR_COMMAND",
+DEFINE_string(robot_command_lcm_channel, "UR_ROBOT_COMMAND",
               "LCM channel to publish robot command messages");
 DEFINE_string(lcm_url, "udpm://239.255.76.67:7667?ttl=0",
               "LCM URL with IP, port, and TTL settings");
