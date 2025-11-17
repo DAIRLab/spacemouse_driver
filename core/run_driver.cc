@@ -25,7 +25,7 @@ void signalHandler(int signum) {
 
 spacemouse::lcmt_ur_command
 construct_ur_command(const spacemouse::lcmt_spacemouse_state &state,
-                     const SpacemouseSettings &settings) {
+                     const URSpacemouseSettings &settings) {
   spacemouse::lcmt_ur_command command;
   command.utime = state.utime;
   command.control_mode_expected = spacemouse::lcmt_ur_command::kTCPVelocity;
@@ -49,7 +49,7 @@ construct_ur_command(const spacemouse::lcmt_spacemouse_state &state,
 
 DEFINE_string(state_lcm_channel, "SPACE_MOUSE_0_STATE",
               "LCM channel to publish state messages");
-DEFINE_string(robot_command_lcm_channel, "UR_COMMAND",
+DEFINE_string(robot_command_lcm_channel, "UR_ROBOT_COMMAND",
               "LCM channel to publish robot command messages");
 DEFINE_string(lcm_url, "udpm://239.255.76.67:7667?ttl=0",
               "LCM URL with IP, port, and TTL settings");
@@ -60,7 +60,7 @@ DEFINE_string(robot_name, "UR10", "Name of the robot");
 DEFINE_int32(robot_command_rate, 130,
              "Rate to publish robot command messages (Hz)");
 DEFINE_string(gripper_ip, "", "IP address of the gripper");
-DEFINE_int32(gripper_offset, 20, "Offset to be added to gripper position");
+DEFINE_int32(gripper_offset, 20, "Offset to be added to gripper position (position range is 0 - 255)");
 DEFINE_int32(gripper_speed, 100, "Speed of the gripper");
 DEFINE_int32(gripper_force, 0, "Force of the gripper");
 
@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   // Parse the settings file
   auto settings =
-      drake::yaml::LoadYamlFile<SpacemouseSettings>(FLAGS_settings_file_path);
+      drake::yaml::LoadYamlFile<URSpacemouseSettings>(FLAGS_settings_file_path);
   const auto state_period =
       std::chrono::duration<double>(1.0 / FLAGS_state_publish_rate);
   const auto command_period =

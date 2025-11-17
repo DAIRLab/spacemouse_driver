@@ -1,6 +1,6 @@
 filegroup(
     name = "setting_yaml_file",
-    srcs = ["spacemouse_settings.yaml"],
+    srcs = glob(["*.yaml"]),
     visibility = ["//visibility:public"],
 )
 

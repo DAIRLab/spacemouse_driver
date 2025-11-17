@@ -1,0 +1,17 @@
+zero_when_static: true
+
+# The number of polls needed to be done before the device is considered "static"
+static_count_threshold: 30
+
+# Set the translational deadband
+static_trans_deadband: 50
+
+# Set the rotational deadband
+static_rot_deadband: 50
+
+# For normalizing output values from SpaceMouse to [-1, 1]
+full_scale: 512.0
+
+# Only for sending UR commands
+franka_linear_scale: 15 # max 25
+franka_angular_scale: 10 # max 15 
