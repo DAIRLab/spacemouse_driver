@@ -119,7 +119,7 @@ class FrankaCartesianPoseIntegrator {
     plant_.SetVelocities(plant_context_, joint_velocities);
     auto ee_pose = plant_.CalcRelativeTransform(
         *plant_context_, plant_.world_frame(),
-        plant_.GetFrameByName("end_effector_frame"));
+        plant_.GetFrameByName("finger_tip"));
     Eigen::VectorXd pose(6);
     // double dt = (std::chrono::duration_cast<std::chrono::microseconds>(
     //                  std::chrono::system_clock::now().time_since_epoch())
@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
   drake::multibody::Parser parser(&plant, nullptr);
   parser.SetAutoRenaming(true);
   drake::multibody::ModelInstanceIndex franka_index = parser.AddModelsFromUrl(
-      "package://drake_models/franka_description/urdf/panda_arm.urdf")[0];
+      "package://drake_models/franka_description/urdf/panda_arm_hand_with_fixed_long_fingers.urdf")[0];
   drake::math::RigidTransform<double> X_WI =
       drake::math::RigidTransform<double>::Identity();
   plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("panda_link0"),
