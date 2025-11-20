@@ -1,3 +1,4 @@
+//clang-format off
 #include "common.h"
 #include "configs/spacemouse_settings.h"
 #include "spacemouse/lcmt_franka_cartesian_pose.hpp"
@@ -5,6 +6,7 @@
 #include "spacemouse/lcmt_spacemouse_state.hpp"
 
 #include "drake/common/find_resource.h"
+#include "drake/common/text_logging.h"
 #include "drake/common/yaml/yaml_io.h"
 #include "drake/lcmt_schunk_wsg_command.hpp"
 #include "drake/lcmt_schunk_wsg_status.hpp"
@@ -14,14 +16,15 @@
 #include "drake/multibody/parsing/parser.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/systems/framework/context.h"
+// clang-format on
 
 #include <chrono>
+#include <cmath>  // Required for std::acos()
 #include <csignal>
 #include <iostream>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <cmath> // Required for std::acos()
 
 #include <Eigen/Core>
 #include <gflags/gflags.h>
@@ -95,15 +98,28 @@ class FrankaCartesianPoseIntegrator {
         lcm_.subscribe(lcm_status_channel_,
                        &FrankaCartesianPoseIntegrator::handleRobotOutput, this);
     sub->setQueueCapacity(100);
+    if (lcm_.handleTimeout(2) < 0) {
+      drake::log()->error("LCM handle failed to recieve initial robot output.");
+      return -1;
+    }
+    auto current_pose = GetCurrentCartesianPose();
+    drake::log()->info("Current pose initialized.");
+    DRAKE_DEMAND(current_pose.has_value());
+    DRAKE_DEMAND(std::get<0>(current_pose.value()).rotation().IsValid());
+    last_predicted_robot_pose_ = std::get<0>(current_pose.value());
+    last_predicted_robot_pose_time_ = std::get<1>(current_pose.value());
+    last_velocity_command_ = Eigen::VectorXd::Zero(6);
+    drake::log()->info("FrankaCartesianPoseIntegrator started.");
     return 0;
   }
 
-  std::optional<Eigen::VectorXd> CalcCartesianPose(Eigen::VectorXd v) {
+  std::optional<std::tuple<drake::math::RigidTransform<double>, double>>
+  GetCurrentCartesianPose() {
     // Clear out any other pending messages
     while (lcm_.handleTimeout(0) > 0) {
     }
 
-    if (!last_robot_output_) {
+    if (!last_robot_output_.has_value()) {
       return std::nullopt;
     }
     Eigen::VectorXd joint_positions(7);
@@ -121,28 +137,67 @@ class FrankaCartesianPoseIntegrator {
           last_robot_output_->velocity[5], last_robot_output_->velocity[6];
       last_output_time = last_robot_output_->utime * 1e-6;
     }
-    DRAKE_ASSERT(v.size() == 6);
     plant_.SetPositions(plant_context_, joint_positions);
     plant_.SetVelocities(plant_context_, joint_velocities);
-    auto ee_pose =
+    return std::make_tuple(
         plant_.CalcRelativeTransform(*plant_context_, plant_.world_frame(),
-                                     plant_.GetFrameByName("finger_tip"));
-    Eigen::VectorXd pose(6);
-    // double dt = (std::chrono::duration_cast<std::chrono::microseconds>(
-    //                  std::chrono::system_clock::now().time_since_epoch())
-    //                  .count() *
-    //              1e-6) -
-    //             last_output_time;
-    double dt = 1.0 / FLAGS_robot_command_rate;
-    DRAKE_ASSERT(dt >= 0);
-    pose.head<3>() = ee_pose.translation() + v.head<3>() * linear_scale_;
-    auto rpy = v.tail<3>() * angular_scale_;
-    auto new_pose = RotationMatrix<double>(RollPitchYaw(rpy[0], rpy[1], rpy[2])) * ee_pose.rotation();
+                                     plant_.GetFrameByName(end_effector_name_)),
+        last_output_time);
+  }
 
-    pose[3] = RollPitchYaw<double>(new_pose).roll_angle();
-    pose[4] = RollPitchYaw<double>(new_pose).pitch_angle();
-    pose[5] = RollPitchYaw<double>(new_pose).yaw_angle();
-    return pose;
+  std::optional<Eigen::VectorXd> GetTargetCartesianPose(Eigen::VectorXd v) {
+    DRAKE_ASSERT(v.size() == 6);
+    auto current_pose = GetCurrentCartesianPose();
+    if (!current_pose.has_value()) {
+      return std::nullopt;
+    }
+    auto current_transform = std::get<0>(current_pose.value());
+    double current_time = std::get<1>(current_pose.value());
+
+    DRAKE_ASSERT(current_time - last_predicted_robot_pose_time_ >= 0);
+    DRAKE_DEMAND(current_time - last_predicted_robot_pose_time_ <
+                 1e2);  // 0.1 second
+    auto predicted_pose = IntegrateVelocityCommand(
+        last_predicted_robot_pose_, last_velocity_command_,
+        current_time - last_predicted_robot_pose_time_);
+
+    if ((predicted_pose.translation() - current_transform.translation())
+            .norm() > max_translation_delta_) {
+      drake::log()->debug(
+          "Limiting translation delta from {} to {} meters.",
+          (predicted_pose.translation() - current_transform.translation())
+              .norm(),
+          max_translation_delta_);
+      auto dx = predicted_pose.translation() - current_transform.translation();
+      predicted_pose.set_translation(current_transform.translation() +
+                                     dx.normalized() * max_translation_delta_);
+    }
+
+    auto rotation_diff = current_transform.rotation().InvertAndCompose(
+        predicted_pose.rotation());
+    auto axis_angle_diff = rotation_diff.ToAngleAxis();
+    if (std::abs(axis_angle_diff.angle()) > max_rotation_delta_) {
+      drake::log()->debug("Limiting rotation delta from {} to {} radians.",
+                          axis_angle_diff.angle(), max_rotation_delta_);
+      auto target_angle_diff =
+          (axis_angle_diff.angle() > 0 ? 1 : -1) * max_rotation_delta_;
+      auto limited_rotation = RotationMatrix<double>(
+          Eigen::AngleAxis<double>(target_angle_diff, axis_angle_diff.axis()));
+      predicted_pose.set_rotation(current_transform.rotation() *
+                                  limited_rotation);
+    }
+
+    auto target_pose =
+        IntegrateVelocityCommand(predicted_pose, v);  // plan pose in 1s
+
+    last_predicted_robot_pose_ = predicted_pose;
+    last_predicted_robot_pose_time_ = current_time;
+    last_velocity_command_ = v;
+
+    Eigen::Vector<double, 6> target_pose_vector;
+    target_pose_vector << target_pose.translation(),
+        target_pose.rotation().ToRollPitchYaw().vector();
+    return target_pose_vector;
   }
 
   void handleRobotOutput(const lcm::ReceiveBuffer*, const std::string&,
@@ -150,6 +205,32 @@ class FrankaCartesianPoseIntegrator {
     std::lock_guard<std::mutex> lock(robot_input_mutex_);
     last_robot_output_ = *msg;
   }
+
+ private:
+  drake::math::RigidTransform<double> IntegrateVelocityCommand(
+      const drake::math::RigidTransform<double>& current_transform,
+      const Eigen::VectorXd& v, double dt = 1.0) {
+    DRAKE_ASSERT(v.size() == 6);
+    Eigen::Vector3d delta_position =
+        Eigen::Vector3d(v[0], v[1], v[2]) * linear_scale_ * dt;
+    Eigen::Vector3d delta_rpy =
+        Eigen::Vector3d(v[3], v[4], v[5]) * angular_scale_ * dt;
+
+    // Update translation
+    Eigen::Vector3d new_translation =
+        current_transform.translation() + delta_position;
+
+    // Update rotation
+    auto new_rotation = RotationMatrix<double>(RollPitchYaw<double>(
+                            delta_rpy[0], delta_rpy[1], delta_rpy[2])) *
+                        current_transform.rotation();
+
+    return drake::math::RigidTransform<double>(new_rotation, new_translation);
+  }
+
+  drake::math::RigidTransform<double> last_predicted_robot_pose_;
+  double last_predicted_robot_pose_time_{0.0};
+  Eigen::VectorXd last_velocity_command_ = Eigen::VectorXd::Zero(6);
   const drake::multibody::MultibodyPlant<double>& plant_;
   drake::systems::Context<double>* plant_context_;
   std::string end_effector_name_;
@@ -160,6 +241,10 @@ class FrankaCartesianPoseIntegrator {
   const std::string lcm_status_channel_;
   double linear_scale_;
   double angular_scale_;
+  double max_translation_delta_{
+      0.1};  // Maximum allowed translation delta in meters
+  double max_rotation_delta_{M_PI /
+                             12};  // Maximum allowed rotation delta in radians
 };
 
 class FrankaHandStateListener {
@@ -244,6 +329,7 @@ inline const drake::math::RigidTransform<double> T_EE_L7 =
 
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
+  drake::logging::set_log_level("debug");
 
   // Parse the settings file
   auto find_runfile = FindRunfile(FLAGS_settings_file_path);
@@ -270,12 +356,10 @@ int main(int argc, char** argv) {
       drake::math::RigidTransform<double>::Identity();
   plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("panda_link0"),
                    X_WI);
-  plant.AddFrame(std::make_unique<drake::multibody::FixedOffsetFrame<double>>(
-      "end_effector_frame", plant.GetBodyByName("panda_link7"), T_EE_L7));
   plant.Finalize();
   auto plant_context = plant.CreateDefaultContext();
   FrankaCartesianPoseIntegrator integrator(
-      plant, plant_context.get(), "panda_link7", FLAGS_lcm_url,
+      plant, plant_context.get(), "finger_tip", FLAGS_lcm_url,
       FLAGS_robot_command_lcm_channel, FLAGS_robot_status_lcm_channel,
       settings.franka_linear_scale, settings.franka_angular_scale);
   std::cout << "Franka Cartesian Pose Integrator setup complete\n";
@@ -429,13 +513,16 @@ int main(int argc, char** argv) {
       Eigen::VectorXd v(6);
       v << state.linear[0], state.linear[1], state.linear[2], state.angular[0],
           state.angular[1], state.angular[2];
-      auto pose_opt = integrator.CalcCartesianPose(v);
+      auto pose_opt = integrator.GetTargetCartesianPose(v);
       if (pose_opt.has_value()) {
         spacemouse::lcmt_franka_cartesian_pose pose =
             construct_franka_cartesian_pose(state.utime, pose_opt.value(),
                                             settings);
         lcm.publish(FLAGS_robot_command_lcm_channel, &pose);
         last_command_pub_time = now;
+      } else {
+        drake::log()->warn(
+            "No target pose computed, skipping command publish.");
       }
     }
 
@@ -447,7 +534,7 @@ int main(int argc, char** argv) {
 
   std::cout << "Preparing to exit, sending final command to stop the robot\n";
   // Send a final command to stop the robot
-  auto pose_opt = integrator.CalcCartesianPose(Eigen::VectorXd::Zero(6));
+  auto pose_opt = integrator.GetTargetCartesianPose(Eigen::VectorXd::Zero(6));
   if (pose_opt.has_value()) {
     spacemouse::lcmt_franka_cartesian_pose pose =
         construct_franka_cartesian_pose(state.utime, pose_opt.value(),

@@ -13,5 +13,5 @@ static_rot_deadband: 50
 full_scale: 512.0
 
 # Only for sending UR commands
-franka_linear_scale: 0.08 # max 25
-franka_angular_scale: 0.5 # max 15 
+franka_linear_scale: 0.08
+franka_angular_scale: 0.40
