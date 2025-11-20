@@ -7,10 +7,11 @@
 #include "drake/common/find_resource.h"
 #include "drake/common/yaml/yaml_io.h"
 #include "drake/lcmt_schunk_wsg_command.hpp"
+#include "drake/lcmt_schunk_wsg_status.hpp"
 #include "drake/math/roll_pitch_yaw.h"
 #include "drake/math/wrap_to.h"
-#include "drake/multibody/parsing/parser.h"
 #include "drake/multibody/parsing/package_map.h"
+#include "drake/multibody/parsing/parser.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/systems/framework/context.h"
 
@@ -27,6 +28,7 @@
 #include <lcm/lcm-cpp.hpp>
 #include <optional>
 #include <spnav.h>
+#include <variant>
 
 using drake::math::RollPitchYaw;
 using drake::math::RotationMatrix;
@@ -55,9 +57,9 @@ DEFINE_string(robot_command_lcm_channel, "TARGET_CARTESIAN_POSE",
               "LCM channel to publish robot command messages");
 DEFINE_string(robot_status_lcm_channel, "FRANKA_STATE",
               "LCM channel to receive robot status messages");
-DEFINE_string(gripper_state_lcm_channel, "GRIPPER_STATE",
+DEFINE_string(gripper_state_lcm_channel, "PANDA_HAND_STATUS",
               "LCM channel to receive gripper state messages");
-DEFINE_string(gripper_command_lcm_channel, "GRIPPER_COMMAND",
+DEFINE_string(gripper_command_lcm_channel, "PANDA_HAND_COMMAND",
               "LCM channel to send gripper command messages");
 DEFINE_int32(gripper_offset, 20,
              "Offset (in mm) to be added to gripper position");
@@ -68,6 +70,7 @@ DEFINE_string(settings_file_path, "configs/franka_spacemouse_settings.yaml",
 DEFINE_int32(state_publish_rate, 2000, "Rate to publish state messages (Hz)");
 DEFINE_int32(robot_command_rate, 130,
              "Rate to publish robot command messages (Hz)");
+DEFINE_bool(is_simulation, true, "Get robot hand status from simulation");
 
 class FrankaCartesianPoseIntegrator {
  public:
@@ -121,9 +124,9 @@ class FrankaCartesianPoseIntegrator {
     DRAKE_ASSERT(v.size() == 6);
     plant_.SetPositions(plant_context_, joint_positions);
     plant_.SetVelocities(plant_context_, joint_velocities);
-    auto ee_pose = plant_.CalcRelativeTransform(
-        *plant_context_, plant_.world_frame(),
-        plant_.GetFrameByName("finger_tip"));
+    auto ee_pose =
+        plant_.CalcRelativeTransform(*plant_context_, plant_.world_frame(),
+                                     plant_.GetFrameByName("finger_tip"));
     Eigen::VectorXd pose(6);
     // double dt = (std::chrono::duration_cast<std::chrono::microseconds>(
     //                  std::chrono::system_clock::now().time_since_epoch())
@@ -132,8 +135,8 @@ class FrankaCartesianPoseIntegrator {
     //             last_output_time;
     double dt = 1.0 / FLAGS_robot_command_rate;
     DRAKE_ASSERT(dt >= 0);
-    pose.head<3>() = ee_pose.translation() + v.head<3>() * linear_scale_ * dt;
-    auto rpy = v.tail<3>() * angular_scale_ / FLAGS_robot_command_rate;
+    pose.head<3>() = ee_pose.translation() + v.head<3>() * linear_scale_;
+    auto rpy = v.tail<3>() * angular_scale_;
     auto new_pose = RotationMatrix<double>(RollPitchYaw(rpy[0], rpy[1], rpy[2])) * ee_pose.rotation();
 
     pose[3] = RollPitchYaw<double>(new_pose).roll_angle();
@@ -162,14 +165,22 @@ class FrankaCartesianPoseIntegrator {
 class FrankaHandStateListener {
  public:
   FrankaHandStateListener(const std::string& lcm_url,
-                          const std::string& lcm_gripper_state_channel)
-      : lcm_(lcm_url), lcm_gripper_state_channel_(lcm_gripper_state_channel) {}
+                          const std::string& lcm_gripper_state_channel,
+                          bool is_simulation)
+      : lcm_(lcm_url),
+        lcm_gripper_state_channel_(lcm_gripper_state_channel),
+        is_simulation_(is_simulation) {}
   ~FrankaHandStateListener() {}
 
   int start() {
-    lcm::Subscription* sub =
-        lcm_.subscribe(lcm_gripper_state_channel_,
-                       &FrankaHandStateListener::handleGripperState, this);
+    lcm::Subscription* sub;
+    if (!is_simulation_)
+      sub = lcm_.subscribe(lcm_gripper_state_channel_,
+                           &FrankaHandStateListener::handleGripperStateSchunk,
+                           this);
+    else
+      sub = lcm_.subscribe(lcm_gripper_state_channel_,
+                           &FrankaHandStateListener::handleGripperState, this);
     sub->setQueueCapacity(100);
     return 0;
   }
@@ -178,7 +189,10 @@ class FrankaHandStateListener {
     while (lcm_.handleTimeout(0) > 0) {
     }
 
-    if (!last_gripper_state_.has_value()) {
+    if (is_simulation_ && !last_gripper_state_.has_value()) {
+      std::cout << "No gripper state received yet." << std::endl;
+      return std::nullopt;
+    } else if (!is_simulation_ && !last_gripper_schunk_state_.has_value()) {
       std::cout << "No gripper state received yet." << std::endl;
       return std::nullopt;
     }
@@ -186,9 +200,14 @@ class FrankaHandStateListener {
     int position_in_mm = 0;
     {
       std::lock_guard<std::mutex> lock(gripper_state_mutex_);
-      position_in_mm = std::round((last_gripper_state_->position[0] +
-                                   last_gripper_state_->position[1]) *
-                                  1000);
+
+      if (!is_simulation_) {
+        position_in_mm = last_gripper_schunk_state_->actual_position_mm;
+      } else {
+        position_in_mm = std::round((last_gripper_state_->position[0] +
+                                     last_gripper_state_->position[1]) *
+                                    1000);
+      }
     }
     return position_in_mm;
   }
@@ -201,10 +220,19 @@ class FrankaHandStateListener {
     last_gripper_state_ = *msg;
   }
 
+  void handleGripperStateSchunk(const lcm::ReceiveBuffer* rbuf,
+                                const std::string& channel,
+                                const drake::lcmt_schunk_wsg_status* msg) {
+    std::lock_guard<std::mutex> lock(gripper_state_mutex_);
+    last_gripper_schunk_state_ = *msg;
+  }
+
   lcm::LCM lcm_;
   std::string lcm_gripper_state_channel_;
   std::optional<spacemouse::lcmt_robot_output> last_gripper_state_;
+  std::optional<drake::lcmt_schunk_wsg_status> last_gripper_schunk_state_;
   std::mutex gripper_state_mutex_;
+  bool is_simulation_;
 };
 
 inline const Eigen::Vector3d TOOL_ATTACHMENT_FRAME = {0, 0, 0.107};
@@ -236,7 +264,8 @@ int main(int argc, char** argv) {
   drake::multibody::Parser parser(&plant, nullptr);
   parser.SetAutoRenaming(true);
   drake::multibody::ModelInstanceIndex franka_index = parser.AddModelsFromUrl(
-      "package://drake_models/franka_description/urdf/panda_arm_hand_with_fixed_long_fingers.urdf")[0];
+      "package://drake_models/franka_description/urdf/"
+      "panda_arm_hand_with_fixed_long_fingers.urdf")[0];
   drake::math::RigidTransform<double> X_WI =
       drake::math::RigidTransform<double>::Identity();
   plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("panda_link0"),
@@ -253,8 +282,8 @@ int main(int argc, char** argv) {
   integrator.start();
 
   // Try to connect to the Franka Hand state listener
-  FrankaHandStateListener hand_listener(FLAGS_lcm_url,
-                                        FLAGS_gripper_state_lcm_channel);
+  FrankaHandStateListener hand_listener(
+      FLAGS_lcm_url, FLAGS_gripper_state_lcm_channel, FLAGS_is_simulation);
   hand_listener.start();
 
   // Try to connect to a SpaceMouse
