@@ -232,11 +232,11 @@ int main(int argc, char **argv) {
                       sys_now.time_since_epoch())
                       .count();
 
-    state.linear[0] = normed_x;
-    state.linear[1] = normed_y;
+    state.linear[0] = -normed_y;
+    state.linear[1] = normed_x;
     state.linear[2] = normed_z;
-    state.angular[0] = normed_rx;
-    state.angular[1] = normed_ry;
+    state.angular[0] = -normed_ry;
+    state.angular[1] = normed_rx;
     state.angular[2] = normed_rz;
     state.n_buttons = n_buttons;
     state.button_pressed.resize(n_buttons);
