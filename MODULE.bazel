@@ -38,7 +38,6 @@ use_repo(libspnav_extension, "libspnav")
 
 drake_models_extension = use_extension("@spacemouse//tools/drake_models:repository.bzl", "drake_models_extension")
 use_repo(drake_models_extension, "my_drake_models")
-
 override_repo(
     drake_dep_repositories,
     drake_models = "my_drake_models",

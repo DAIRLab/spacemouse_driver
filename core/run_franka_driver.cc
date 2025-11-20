@@ -20,12 +20,16 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <cmath> // Required for std::acos()
 
 #include <Eigen/Core>
 #include <gflags/gflags.h>
 #include <lcm/lcm-cpp.hpp>
 #include <optional>
 #include <spnav.h>
+
+using drake::math::RollPitchYaw;
+using drake::math::RotationMatrix;
 
 std::atomic<bool> running(true);
 
@@ -129,11 +133,12 @@ class FrankaCartesianPoseIntegrator {
     double dt = 1.0 / FLAGS_robot_command_rate;
     DRAKE_ASSERT(dt >= 0);
     pose.head<3>() = ee_pose.translation() + v.head<3>() * linear_scale_ * dt;
-    pose.tail<3>() = ee_pose.rotation().ToRollPitchYaw().vector() +
-                     v.tail<3>() * angular_scale_ * dt;
-    pose[3] = drake::math::wrap_to(pose[3], -M_PI, M_PI);
-    pose[4] = drake::math::wrap_to(pose[4], -M_PI, M_PI);
-    pose[5] = drake::math::wrap_to(pose[5], -M_PI, M_PI);
+    auto rpy = v.tail<3>() * angular_scale_ / FLAGS_robot_command_rate;
+    auto new_pose = RotationMatrix<double>(RollPitchYaw(rpy[0], rpy[1], rpy[2])) * ee_pose.rotation();
+
+    pose[3] = RollPitchYaw<double>(new_pose).roll_angle();
+    pose[4] = RollPitchYaw<double>(new_pose).pitch_angle();
+    pose[5] = RollPitchYaw<double>(new_pose).yaw_angle();
     return pose;
   }
 
