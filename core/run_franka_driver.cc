@@ -203,7 +203,7 @@ class FrankaCartesianPoseIntegrator {
     }
 
     auto target_pose =
-        IntegrateVelocityCommand(predicted_pose, v);  // plan pose in 1s
+        IntegrateVelocityCommand(predicted_pose, v, 0.01);  // plan pose in 1s
 
     last_predicted_robot_pose_ = predicted_pose;
     last_predicted_robot_pose_time_ = current_time;
@@ -263,7 +263,7 @@ class FrankaCartesianPoseIntegrator {
   double linear_scale_;
   double angular_scale_;
   double max_translation_delta_{
-      0.2};  // Maximum allowed translation delta in meters
+      0.008};  // Maximum allowed translation delta in meters
   double max_rotation_delta_{M_PI /
                              8};  // Maximum allowed rotation delta in radians
 };
