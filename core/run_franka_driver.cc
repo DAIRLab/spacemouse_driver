@@ -2,6 +2,7 @@
 #include "common.h"
 #include "configs/spacemouse_settings.h"
 #include "spacemouse/lcmt_franka_cartesian_pose.hpp"
+#include "spacemouse/lcmt_radio_out.hpp"
 #include "spacemouse/lcmt_robot_output.hpp"
 #include "spacemouse/lcmt_spacemouse_state.hpp"
 
@@ -102,6 +103,9 @@ class FrankaCartesianPoseIntegrator {
       drake::log()->error("LCM handle failed to recieve initial robot output.");
       return -1;
     }
+    lcm::Subscription* radio_sub = lcm_.subscribe(
+        "RADIO", &FrankaCartesianPoseIntegrator::handleRadioState, this);
+    radio_sub->setQueueCapacity(10);
     auto current_pose = GetCurrentCartesianPose();
     drake::log()->info("Current pose initialized.");
     DRAKE_DEMAND(current_pose.has_value());
@@ -122,6 +126,7 @@ class FrankaCartesianPoseIntegrator {
     if (!last_robot_output_.has_value()) {
       return std::nullopt;
     }
+
     Eigen::VectorXd joint_positions(7);
     Eigen::VectorXd joint_velocities(7);
     double last_output_time = 0.0;
@@ -151,8 +156,18 @@ class FrankaCartesianPoseIntegrator {
     if (!current_pose.has_value()) {
       return std::nullopt;
     }
+
     auto current_transform = std::get<0>(current_pose.value());
     double current_time = std::get<1>(current_pose.value());
+
+    if (!use_spacemouse_) {
+      // Radio button indicates not in spacmouse mode
+      last_predicted_robot_pose_ = current_transform;
+      last_predicted_robot_pose_time_ = current_time;
+      last_velocity_command_ = Eigen::VectorXd::Zero(6);
+
+      return std::nullopt;
+    }
 
     DRAKE_ASSERT(current_time - last_predicted_robot_pose_time_ >= 0);
     DRAKE_DEMAND(current_time - last_predicted_robot_pose_time_ <
@@ -206,6 +221,11 @@ class FrankaCartesianPoseIntegrator {
     last_robot_output_ = *msg;
   }
 
+  void handleRadioState(const lcm::ReceiveBuffer*, const std::string&,
+                        const spacemouse::lcmt_radio_out* msg) {
+    use_spacemouse_ = (msg->channel[14] != 0.0);
+  }
+
  private:
   drake::math::RigidTransform<double> IntegrateVelocityCommand(
       const drake::math::RigidTransform<double>& current_transform,
@@ -236,15 +256,16 @@ class FrankaCartesianPoseIntegrator {
   std::string end_effector_name_;
   std::optional<spacemouse::lcmt_robot_output> last_robot_output_;
   std::mutex robot_input_mutex_;
+  bool use_spacemouse_ = true;
   lcm::LCM lcm_;
   const std::string lcm_command_channel_;
   const std::string lcm_status_channel_;
   double linear_scale_;
   double angular_scale_;
   double max_translation_delta_{
-      0.1};  // Maximum allowed translation delta in meters
+      0.2};  // Maximum allowed translation delta in meters
   double max_rotation_delta_{M_PI /
-                             12};  // Maximum allowed rotation delta in radians
+                             8};  // Maximum allowed rotation delta in radians
 };
 
 class FrankaHandStateListener {
@@ -520,10 +541,11 @@ int main(int argc, char** argv) {
                                             settings);
         lcm.publish(FLAGS_robot_command_lcm_channel, &pose);
         last_command_pub_time = now;
-      } else {
-        drake::log()->warn(
-            "No target pose computed, skipping command publish.");
-      }
+      } 
+      // else {
+      //   drake::log()->warn(
+      //       "No target pose computed, skipping command publish.");
+      // }
     }
 
     // Maintain base loop rate
