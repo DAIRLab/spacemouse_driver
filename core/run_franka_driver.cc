@@ -173,8 +173,7 @@ class FrankaCartesianPoseIntegrator {
     DRAKE_DEMAND(current_time - last_predicted_robot_pose_time_ <
                  1e2);  // 0.1 second
     auto predicted_pose = IntegrateVelocityCommand(
-        last_predicted_robot_pose_, last_velocity_command_,
-        current_time - last_predicted_robot_pose_time_);
+        last_predicted_robot_pose_, v, 1.0 / FLAGS_robot_command_rate);
 
     if ((predicted_pose.translation() - current_transform.translation())
             .norm() > max_translation_delta_) {
@@ -202,16 +201,17 @@ class FrankaCartesianPoseIntegrator {
                                   limited_rotation);
     }
 
-    auto target_pose =
-        IntegrateVelocityCommand(predicted_pose, v, 0.01);  // plan pose in 1s
+    // auto target_pose =
+    //     IntegrateVelocityCommand(predicted_pose, v, 0.01);  // plan pose in
+    //     1s
 
     last_predicted_robot_pose_ = predicted_pose;
     last_predicted_robot_pose_time_ = current_time;
     last_velocity_command_ = v;
 
     Eigen::Vector<double, 6> target_pose_vector;
-    target_pose_vector << target_pose.translation(),
-        target_pose.rotation().ToRollPitchYaw().vector();
+    target_pose_vector << predicted_pose.translation(),
+        predicted_pose.rotation().ToRollPitchYaw().vector();
     return target_pose_vector;
   }
 
@@ -263,7 +263,7 @@ class FrankaCartesianPoseIntegrator {
   double linear_scale_;
   double angular_scale_;
   double max_translation_delta_{
-      0.008};  // Maximum allowed translation delta in meters
+      0.005};  // Maximum allowed translation delta in meters
   double max_rotation_delta_{M_PI /
                              8};  // Maximum allowed rotation delta in radians
 };
@@ -541,7 +541,7 @@ int main(int argc, char** argv) {
                                             settings);
         lcm.publish(FLAGS_robot_command_lcm_channel, &pose);
         last_command_pub_time = now;
-      } 
+      }
       // else {
       //   drake::log()->warn(
       //       "No target pose computed, skipping command publish.");
