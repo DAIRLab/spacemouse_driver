@@ -1,3 +1,6 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
@@ -12,44 +15,49 @@ cc_library(
 cc_binary(
     name = "run_driver",
     srcs = ["run_driver.cc"],
-    deps = [
-        "//core:common",
-        "//configs:spacemouse_settings",
-        "//lcmtypes:lcmt_robot",
-        "@libspnav//:libspnav",
-        "@robotiq-driver//:robotiq_gripper",
-        "@lcm//:lcm",
-        "@gflags",
-        "@drake//common/yaml:yaml_io",
-    ],
     data = [
         "//configs:setting_yaml_file",
-    ]
+    ],
+    deps = [
+        "//configs:spacemouse_settings",
+        "//core:common",
+        "//lcmtypes:lcmt_robot",
+        "@drake//common/yaml:yaml_io",
+        "@gflags",
+        "@lcm",
+        "@libspnav//:libspnav",
+        "@robotiq-driver//:robotiq_gripper",
+    ] + select({
+        "@platforms//os:macos": ["@X11//:X11"],
+        "//conditions:default": [],
+    }),
 )
 
 cc_binary(
     name = "run_franka_driver",
     srcs = ["run_franka_driver.cc"],
-    deps = [
-        "//core:common",
-        "//configs:spacemouse_settings",
-        "//lcmtypes:lcmt_robot",
-        "@libspnav//:libspnav",
-        "@robotiq-driver//:robotiq_gripper",
-        "@lcm//:lcm",
-        "@gflags",
-        "@drake//common:find_resource",
-        "@drake//common/yaml:yaml_io",
-        "@drake//math:geometric_transform",
-        "@drake//math:wrap_to",
-        "@drake//multibody/plant:plant",
-        "@drake//multibody/parsing:parsing",
-        "@drake//systems/framework:framework",
-        "@drake//lcmtypes:lcmtypes_drake_cc"
-
-    ],
     data = [
         "//configs:setting_yaml_file",
         "@drake_models//:franka_description",
-    ]
+    ],
+    deps = [
+        "//configs:spacemouse_settings",
+        "//core:common",
+        "//lcmtypes:lcmt_robot",
+        "@drake//common:find_resource",
+        "@drake//common/yaml:yaml_io",
+        "@drake//lcmtypes:lcmtypes_drake_cc",
+        "@drake//math:geometric_transform",
+        "@drake//math:wrap_to",
+        "@drake//multibody/parsing",
+        "@drake//multibody/plant",
+        "@drake//systems/framework",
+        "@gflags",
+        "@lcm",
+        "@libspnav//:libspnav",
+        "@robotiq-driver//:robotiq_gripper",
+    ] + select({
+        "@platforms//os:macos": ["@X11//:X11"],
+        "//conditions:default": [],
+    }),
 )

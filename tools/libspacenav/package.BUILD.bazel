@@ -18,7 +18,11 @@ configure_make(
         "LDFLAGS": "-shared -fPIC",
         "CFLAGS": "-fPIC",
     },
-    copts = ["-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"],
+    copts = select({
+        "@platforms//os:macos": ["-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"],
+        "@platforms//os:linux": [],
+        "//conditions:default": [],
+    }),
     linkopts = ["-lX11"],
     visibility = ["//visibility:public"],
 )
