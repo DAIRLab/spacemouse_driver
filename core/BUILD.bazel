@@ -24,7 +24,7 @@ cc_binary(
         "//lcmtypes:lcmt_robot",
         "@drake//common/yaml:yaml_io",
         "@gflags",
-        "@lcm",
+        "@lcm//lcm:lcm-shared",
         "@libspnav//:libspnav",
         "@robotiq-driver//:robotiq_gripper",
     ] + select({
@@ -53,7 +53,7 @@ cc_binary(
         "@drake//multibody/plant",
         "@drake//systems/framework",
         "@gflags",
-        "@lcm",
+        "@lcm//lcm:lcm-shared",
         "@libspnav//:libspnav",
         "@robotiq-driver//:robotiq_gripper",
     ] + select({
