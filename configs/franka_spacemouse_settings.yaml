@@ -12,6 +12,9 @@ static_rot_deadband: 50
 # For normalizing output values from SpaceMouse to [-1, 1]
 full_scale: 512.0
 
-# Only for sending UR commands
-franka_linear_scale: 0.08 # max 25
-franka_angular_scale: 0.5 # max 15 
+# Map raw SpaceMouse axes [x, y, z] and [rx, ry, rz] into published robot-frame
+# linear/angular axes. This matches the original Franka driver behavior.
+linear_axis: [0, 2, 1]
+linear_sign: [1.0, 1.0, 1.0]
+angular_axis: [0, 2, 1]
+angular_sign: [1.0, 1.0, 1.0]

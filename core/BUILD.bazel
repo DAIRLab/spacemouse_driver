@@ -5,20 +5,28 @@ cc_library(
     hdrs = ["common.h"],
     deps = [
         "@drake//common:find_runfiles",
-        "@drake//common/yaml:yaml_io",
+    ],
+)
+
+cc_library(
+    name = "spacemouse_state_publisher",
+    srcs = ["spacemouse_state_publisher.cc"],
+    hdrs = ["spacemouse_state_publisher.h"],
+    deps = [
+        "//configs:spacemouse_settings",
+        "//lcmtypes:lcmt_robot",
+        "@libspnav//:libspnav",
+        "@lcm//:lcm",
     ],
 )
 
 cc_binary(
-    name = "run_driver",
-    srcs = ["run_driver.cc"],
+    name = "run_ur_driver",
+    srcs = ["run_ur_driver.cc"],
     deps = [
-        "//core:common",
+        ":spacemouse_state_publisher",
         "//configs:spacemouse_settings",
-        "//lcmtypes:lcmt_robot",
         "@robotiq-driver//lcmtypes:lcmt_robotiq",
-        "@libspnav//:libspnav",
-        "@robotiq-driver//:robotiq_gripper",
         "@lcm//:lcm",
         "@gflags",
         "@drake//common/yaml:yaml_io",
@@ -33,24 +41,15 @@ cc_binary(
     srcs = ["run_franka_driver.cc"],
     deps = [
         "//core:common",
+        ":spacemouse_state_publisher",
         "//configs:spacemouse_settings",
         "//lcmtypes:lcmt_robot",
-        "@libspnav//:libspnav",
-        "@robotiq-driver//:robotiq_gripper",
         "@lcm//:lcm",
         "@gflags",
-        "@drake//common:find_resource",
         "@drake//common/yaml:yaml_io",
-        "@drake//math:geometric_transform",
-        "@drake//math:wrap_to",
-        "@drake//multibody/plant:plant",
-        "@drake//multibody/parsing:parsing",
-        "@drake//systems/framework:framework",
-        "@drake//lcmtypes:lcmtypes_drake_cc"
-
+        "@drake//lcmtypes:lcmtypes_drake_cc",
     ],
     data = [
         "//configs:setting_yaml_file",
-        "@drake_models//:franka_description",
     ]
 )
