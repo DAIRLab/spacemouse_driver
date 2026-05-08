@@ -47,5 +47,5 @@ bazel_dep(name = "robotiq-driver")
 git_override(
     module_name = "robotiq-driver",
     remote = "https://github.com/DAIRLab/robotiq_gripper.git",
-    branch = "main",
+    branch = "stephen/drake-driver",
     )

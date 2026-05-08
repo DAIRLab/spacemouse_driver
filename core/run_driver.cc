@@ -1,7 +1,8 @@
 #include "configs/spacemouse_settings.h"
-#include "robotiq_gripper.h"
 #include "spacemouse/lcmt_spacemouse_state.hpp"
 #include "spacemouse/lcmt_ur_command.hpp"
+#include "robotiq/lcmt_robotiq_command.hpp"
+#include "robotiq/lcmt_robotiq_status.hpp"
 
 #include "drake/common/yaml/yaml_io.h"
 
@@ -9,18 +10,18 @@
 #include <csignal>
 #include <iostream>
 #include <thread>
+#include <mutex>
+#include <optional>
 
 #include <gflags/gflags.h>
 #include <lcm/lcm-cpp.hpp>
 #include <spnav.h>
 
-using namespace driver::robotiq;
-
 std::atomic<bool> running(true);
 
 void signalHandler(int signum) {
   std::cout << "\nInterrupt signal (" << signum << ") received.\n";
-  running = false; // Stop the loop gracefully
+  running = false;
 }
 
 spacemouse::lcmt_ur_command
@@ -37,8 +38,6 @@ construct_ur_command(const spacemouse::lcmt_spacemouse_state &state,
         state.angular[i - 3] * settings.ur_angular_scale[i - 3];
   }
 
-  // Set the joint positions, velocities, and TCP pose to zero
-  // even though they are not used for TCP velocity control
   for (int i = 0; i < 6; i++) {
     command.tcp_pose[i] = 0;
     command.joint_position[i] = 0;
@@ -47,7 +46,7 @@ construct_ur_command(const spacemouse::lcmt_spacemouse_state &state,
   return command;
 }
 
-DEFINE_string(state_lcm_channel, "SPACE_MOUSE_0_STATE",
+DEFINE_string(state_lcm_channel, "SPACE_MOUSE_UR_STATE",
               "LCM channel to publish state messages");
 DEFINE_string(robot_command_lcm_channel, "UR_ROBOT_COMMAND",
               "LCM channel to publish robot command messages");
@@ -59,35 +58,54 @@ DEFINE_int32(state_publish_rate, 2000, "Rate to publish state messages (Hz)");
 DEFINE_string(robot_name, "UR10", "Name of the robot");
 DEFINE_int32(robot_command_rate, 130,
              "Rate to publish robot command messages (Hz)");
-DEFINE_string(gripper_ip, "", "IP address of the gripper");
+DEFINE_string(gripper_command_lcm_channel, "ROBOTIQ_COMMAND",
+              "LCM channel to send gripper command messages");
+DEFINE_string(gripper_status_lcm_channel, "ROBOTIQ_STATUS",
+              "LCM channel to receive gripper status messages");
 DEFINE_int32(gripper_offset, 20, "Offset to be added to gripper position (position range is 0 - 255)");
 DEFINE_int32(gripper_speed, 100, "Speed of the gripper");
 DEFINE_int32(gripper_force, 0, "Force of the gripper");
 
-std::unique_ptr<RobotiqGripper> initialize_gripper() {
-  if (FLAGS_gripper_ip != "") {
-    std::cout << "Attempting to connect to the gripper at IP: "
-              << FLAGS_gripper_ip << std::endl;
-    auto gripper = std::make_unique<RobotiqGripper>(FLAGS_gripper_ip, 63352, 2);
-    if (!gripper->connect()) {
-      std::cout << "Failed to connect to the gripper at IP: "
-                << FLAGS_gripper_ip << std::endl;
-      return nullptr;
-    }
-    if (!gripper->activate()) {
-      std::cout << "Failed to activate the gripper." << std::endl;
-      return nullptr;
-    }
-    std::cout << "Successfully connected and activated the gripper at IP: "
-              << FLAGS_gripper_ip << std::endl;
-    return gripper;
+class RobotiqGripperStateListener {
+ public:
+  RobotiqGripperStateListener(const std::string& lcm_url,
+                              const std::string& lcm_status_channel)
+      : lcm_(lcm_url),
+        lcm_status_channel_(lcm_status_channel) {}
+  ~RobotiqGripperStateListener() {}
+
+  int start() {
+    lcm::Subscription* sub =
+        lcm_.subscribe(lcm_status_channel_,
+                       &RobotiqGripperStateListener::handleGripperStatus, this);
+    sub->setQueueCapacity(100);
+    return 0;
   }
-  return nullptr;
-}
+
+  std::optional<robotiq::lcmt_robotiq_status> get_gripper_status() {
+    while (lcm_.handleTimeout(0) > 0) {
+    }
+
+    std::lock_guard<std::mutex> lock(gripper_status_mutex_);
+    return last_gripper_status_;
+  }
+
+ private:
+  void handleGripperStatus(const lcm::ReceiveBuffer* rbuf,
+                          const std::string& channel,
+                          const robotiq::lcmt_robotiq_status* msg) {
+    std::lock_guard<std::mutex> lock(gripper_status_mutex_);
+    last_gripper_status_ = *msg;
+  }
+
+  lcm::LCM lcm_;
+  std::string lcm_status_channel_;
+  std::optional<robotiq::lcmt_robotiq_status> last_gripper_status_;
+  std::mutex gripper_status_mutex_;
+};
 
 int main(int argc, char **argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
-  // Parse the settings file
   auto settings =
       drake::yaml::LoadYamlFile<URSpacemouseSettings>(FLAGS_settings_file_path);
   const auto state_period =
@@ -95,7 +113,6 @@ int main(int argc, char **argv) {
   const auto command_period =
       std::chrono::duration<double>(1.0 / FLAGS_robot_command_rate);
 
-  // Try to connect to a SpaceMouse
   if (spnav_open() == -1) {
     std::cout << "Failed to connect to a SpaceMouse, please check if the "
                  "daemon spacenavd is running (as root)"
@@ -108,7 +125,6 @@ int main(int argc, char **argv) {
   std::vector<bool> button_pressed(n_buttons, false);
   std::cout << "Number of buttons: " << n_buttons << std::endl;
 
-  // Initialize LCM
   lcm::LCM lcm(FLAGS_lcm_url);
   if (!lcm.good()) {
     std::cout << "Failed to initialize LCM" << std::endl;
@@ -116,9 +132,11 @@ int main(int argc, char **argv) {
   }
   std::cout << "Initialized LCM" << std::endl;
 
-  // Run a loop to publish twist messages
-  // - Poll for any events from the SpaceMouse
-  // - Publish twist messages if any events are received
+  // Initialize gripper state listener
+  RobotiqGripperStateListener gripper_listener(FLAGS_lcm_url,
+                                                FLAGS_gripper_status_lcm_channel);
+  gripper_listener.start();
+
   spnav_event sev;
   int no_motion_count = 0;
   double normed_x = 0;
@@ -131,8 +149,8 @@ int main(int argc, char **argv) {
   auto next_time = std::chrono::steady_clock::now();
   auto last_command_pub_time = next_time;
   spacemouse::lcmt_spacemouse_state state;
+  robotiq::lcmt_robotiq_command gripper_command;
 
-  auto gripper = initialize_gripper();
   double *normed_values[] = {&normed_x, &normed_y, &normed_z};
   double *rot_normed_values[] = {&normed_rx, &normed_ry, &normed_rz};
 
@@ -141,14 +159,9 @@ int main(int argc, char **argv) {
     auto ret = spnav_poll_event(&sev);
     switch (ret) {
     case 0:
-      // After a certain number of polls with no motion, the device is
-      // considered static if the flag zero_when_static is set and the motion
-      // is less than the static deadband, the linear and angular velocities
-      // are set to zero to prevent drift.
       if (++no_motion_count >
           static_cast<int>(settings.static_count_threshold)) {
         if (settings.zero_when_static) {
-          // Check translational axes (x, y, z)
           int *motion_values[] = {&sev.motion.x, &sev.motion.y, &sev.motion.z};
           for (int i = 0; i < 3; ++i) {
             if (std::abs(*motion_values[i]) < settings.static_trans_deadband) {
@@ -156,7 +169,6 @@ int main(int argc, char **argv) {
             }
           }
 
-          // Check rotational axes (rx, ry, rz)
           int *rot_motion_values[] = {&sev.motion.rx, &sev.motion.ry,
                                       &sev.motion.rz};
           for (int i = 0; i < 3; ++i) {
@@ -166,7 +178,7 @@ int main(int argc, char **argv) {
             }
           }
         }
-        no_motion_count = 0; // Reset the no motion count
+        no_motion_count = 0;
       }
       break;
     case SPNAV_EVENT_MOTION:
@@ -178,45 +190,51 @@ int main(int argc, char **argv) {
       normed_ry = -sev.motion.rx / settings.full_scale;
       normed_rz = sev.motion.ry / settings.full_scale;
 
-      no_motion_count = 0; // Reset the no motion count
+      no_motion_count = 0;
 
-      // Safety check: clamp normalized values to [-1, 1] range to prevent
-      // extreme robot movements from invalid SpaceMouse data
       for (int i = 0; i < 3; i++) {
         if (*normed_values[i] < -1.0 || *normed_values[i] > 1.0) {
           *normed_values[i] = 0.0;
         }
         if (*rot_normed_values[i] < -1.0 || *rot_normed_values[i] > 1.0) {
-          *normed_values[i] = 0.0;
+          *rot_normed_values[i] = 0.0;
         }
       }
-
       break;
     case SPNAV_EVENT_BUTTON:
       button_pressed[sev.button.bnum] = sev.button.press;
-      if (gripper) {
-        if (!sev.button.press) {
-          // Ignore button release events
-          break;
-        }
-        if ((gripper->getIntValue(RobotiqCommand::GOTO_STATUS) != 0) &&
-            (gripper->getIntValue(RobotiqCommand::OBJECT_DETECTION_STATUS) ==
-             0)) {
-          // Skip processing button events while the gripper is moving
-          break;
-        }
-        // Example: Open gripper on button 0 press, close on button 1 press
-        if (sev.button.bnum == 0 && sev.button.press) {
-          gripper->moveToPosition(
-              std::min(gripper->getCurrentPosition() + FLAGS_gripper_offset,
-                       255),
-              FLAGS_gripper_speed, FLAGS_gripper_force);
-        } else if (sev.button.bnum == 1 && sev.button.press) {
-          gripper->moveToPosition(
-              std::max(gripper->getCurrentPosition() - FLAGS_gripper_offset, 0),
-              FLAGS_gripper_speed, FLAGS_gripper_force);
-        }
+      if (!sev.button.press) {
+        break;
+      } else {
+      auto gripper_status_opt = gripper_listener.get_gripper_status();
+      if (!gripper_status_opt.has_value()) {
+        break;
       }
+
+      auto status = gripper_status_opt.value();
+      // if ((status.goto_status != 0) && (status.object_detection_status == 0)) {
+      //   // Skip processing button events while the gripper is moving
+      //   break;
+      // }
+
+      gripper_command.utime = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  std::chrono::system_clock::now().time_since_epoch())
+                                  .count();
+      gripper_command.speed = FLAGS_gripper_speed;
+      gripper_command.force = FLAGS_gripper_force;
+
+      if (sev.button.bnum == 0) {
+        // Open gripper
+        gripper_command.position = std::min(
+            static_cast<int>(status.position) + FLAGS_gripper_offset, 255);
+      } else if (sev.button.bnum == 1) {
+        // Close gripper
+        gripper_command.position = std::max(
+            static_cast<int>(status.position) - FLAGS_gripper_offset, 0);
+      }
+
+      lcm.publish(FLAGS_gripper_command_lcm_channel, &gripper_command);
+    }
       break;
     default:
       std::cout << "Received an unknown event from the SpaceMouse, it should "
@@ -226,7 +244,6 @@ int main(int argc, char **argv) {
       break;
     }
 
-    // Get the system time in microseconds
     auto sys_now = std::chrono::system_clock::now();
     state.utime = std::chrono::duration_cast<std::chrono::microseconds>(
                       sys_now.time_since_epoch())
@@ -246,13 +263,12 @@ int main(int argc, char **argv) {
     }
     lcm.publish(FLAGS_state_lcm_channel, &state);
 
-    // Construct the robot command and publish it
     auto now = std::chrono::steady_clock::now();
     if (now - last_command_pub_time >= command_period) {
       if (FLAGS_robot_name == "UR10") {
         spacemouse::lcmt_ur_command command =
             construct_ur_command(state, settings);
-        lcm.publish(FLAGS_robot_command_lcm_channel, &command);
+        // lcm.publish(FLAGS_robot_command_lcm_channel, &command);
       } else {
         std::cout << "Robot name " << FLAGS_robot_name << " not supported"
                   << std::endl;
@@ -262,13 +278,11 @@ int main(int argc, char **argv) {
       last_command_pub_time = now;
     }
 
-    // Maintain base loop rate
     next_time +=
         std::chrono::duration_cast<std::chrono::microseconds>(state_period);
     std::this_thread::sleep_until(next_time);
   }
 
-  // Clean up before exiting
   spnav_close();
   std::cout << "Spacenav closed and program exited gracefully.\n";
   return 0;
