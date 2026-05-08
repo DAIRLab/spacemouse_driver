@@ -39,7 +39,7 @@ bazel build ... --keep_going
 After building, under `spacemouse_driver` directory, simply run
 
 ```sh
-bazel-bin/core/run_driver --lcm_url=udpm://239.255.76.67:7667?ttl=0 --robot_name=UR10 --robot_command_rate=125
+bazel-bin/core/run_ur_driver --lcm_url=udpm://239.255.76.67:7667?ttl=0
 ```
 
 ## Running LCM Driver inside a Docker container
